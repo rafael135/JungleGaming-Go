@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Jungle Gaming - SQS FIFO Infrastructure (Inbound Consumer & Outbound Outbox Events)'
+
+Resources:
+  # ============================================================================
+  # Inbound Operations Consumer Queues (Section 10)
+  # ============================================================================
+  WagerTransactionsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: wager-transactions-dlq.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+
+  WagerTransactionsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: wager-transactions.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WagerTransactionsDLQ.Arn
+        maxReceiveCount: 3
+
+  # ============================================================================
+  # Outbound Integration Events Destination Queues (Section 11 - Outbox Worker)
+  # ============================================================================
+  WagerEventsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: wager-events-dlq.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+
+  WagerEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: wager-events.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WagerEventsDLQ.Arn
+        maxReceiveCount: 3
+
+Outputs:
+  WagerTransactionsQueueUrl:
+    Description: 'URL da fila FIFO de transações de apostas'
+    Value: !Ref WagerTransactionsQueue
+
+  WagerTransactionsQueueArn:
+    Description: 'ARN da fila FIFO de transações de apostas'
+    Value: !GetAtt WagerTransactionsQueue.Arn
+
+  WagerTransactionsDLQUrl:
+    Description: 'URL da fila DLQ de transações de apostas'
+    Value: !Ref WagerTransactionsDLQ
+
+  WagerEventsQueueUrl:
+    Description: 'URL da fila FIFO de eventos de saída (Outbox)'
+    Value: !Ref WagerEventsQueue
+
+  WagerEventsQueueArn:
+    Description: 'ARN da fila FIFO de eventos de saída (Outbox)'
+    Value: !GetAtt WagerEventsQueue.Arn
+
