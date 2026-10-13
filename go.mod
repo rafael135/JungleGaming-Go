@@ -1,3 +1,3 @@
-module jungle/main
+module jungle
 
 go 1.26.5
