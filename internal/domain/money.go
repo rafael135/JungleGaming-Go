@@ -150,10 +150,21 @@ func (m Money) Negate() (Money, error) {
 func (m Money) String() string {
 	integer := m.amountCents / 100
 	cents := m.amountCents % 100
+	sign := ""
+
+	if m.amountCents < 0 {
+		sign = "-"
+	}
+
+	if integer < 0 {
+		sign = "-"
+		integer = -integer
+	}
 
 	if cents < 0 {
+		sign = "-"
 		cents = -cents
 	}
 
-	return fmt.Sprintf("%d.%02d", integer, cents)
+	return fmt.Sprintf("%s%d.%02d", sign, integer, cents)
 }
