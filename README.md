@@ -17,7 +17,7 @@ Para executar o ambiente e os testes localmente, certifique-se de possuir:
 
 ## 2. Variáveis de Ambiente
 
-O projeto utiliza um arquivo `.env` para carregar as configurações locais da aplicação e do Docker Compose. Um modelo com valores padrão de desenvolvimento está disponível em [.env.example](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/.env.example):
+O projeto utiliza um arquivo `.env` para carregar as configurações locais da aplicação e do Docker Compose. Um modelo com valores padrão de desenvolvimento está disponível em [.env.example](./.env.example):
 
 ```bash
 # Copie o arquivo de exemplo para criar o seu .env local
@@ -61,7 +61,7 @@ make up
 
 ## 4. Provisionamento Automático das Filas SQS FIFO
 
-As filas SQS FIFO e suas respectivas DLQs são provisionadas de forma declarativa via **AWS CloudFormation** através do template [infra/sqs-template.yaml](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/infra/sqs-template.yaml):
+As filas SQS FIFO e suas respectivas DLQs são provisionadas de forma declarativa via **AWS CloudFormation** através do template [infra/sqs-template.yaml](./infra/sqs-template.yaml):
 
 * **Fila de Operações (Inbound):** `wager-transactions.fifo`
   * Redrive Policy apontando para `wager-transactions-dlq.fifo` com `maxReceiveCount: 3`.
@@ -191,6 +191,6 @@ make down
 
 ## 9. Documentação Adicional
 
-* [ARCHITECTURE.md](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/ARCHITECTURE.md): Decisões de arquitetura, escolhas de infraestrutura, modelagem de segurança e garantias do sistema.
-* [InstrucoesTeste.md](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/InstrucoesTeste.md): Especificação e requisitos completos do desafio técnico.
+* [ARCHITECTURE.md](./ARCHITECTURE.md): Decisões de arquitetura, escolhas de infraestrutura, modelagem de segurança e garantias do sistema.
+* [InstrucoesTeste.md](./InstrucoesTeste.md): Especificação e requisitos completos do desafio técnico.
 
