@@ -33,9 +33,15 @@ var (
 	ErrWalletCurrencyMismatch = errors.New("wallet currency mismatch")
 	// Tentativa de operação com carteira inválida
 	ErrInvalidWalletId = errors.New("invalid wallet id")
+	// Tentativa de operação com jogador inválido
+	ErrInvalidPlayerId = errors.New("invalid player id")
 )
 
 var (
+	// ID de ledger inválido
+	ErrInvalidLedgerId = errors.New("invalid ledger id")
+	// ID de transação inválido
+	ErrInvalidTransactionId = errors.New("invalid transaction id")
 	// Regra imutável "balanceAfter == balanceBefore + amount" violada
 	ErrInvalidLedgerMath = errors.New("invalid ledger math")
 	// Direção inválida
@@ -45,6 +51,20 @@ var (
 var (
 	// Tentativa de mudar estado a partir de estado terminal ou inválido
 	ErrInvalidStateTransition = errors.New("invalid state transition")
+	// ID de transação externa inválido
+	ErrInvalidExternalTransactionId = errors.New("invalid external transaction id")
+	// ID de provedor inválido
+	ErrInvalidProviderId = errors.New("invalid provider id")
+	// Chave de idempotência inválida
+	ErrInvalidIdempotencyKey = errors.New("invalid idempotency key")
+	// Hash do payload inválido
+	ErrInvalidPayloadHash = errors.New("invalid payload hash")
+	// ID de jogo inválido
+	ErrInvalidGameId = errors.New("invalid game id")
+	// ID de rodada inválida
+	ErrInvalidRoundId = errors.New("invalid round id")
+	// ID de transação referenciada inválida
+	ErrInvalidReferenceExternalTransactionId = errors.New("invalid reference external transaction id")
 	// Tipo de transação desconhecido ou envio de "OPENING" via HTTP/SQS(exclusivo interno)
 	ErrInvalidTransactionType = errors.New("invalid transaction type")
 	// "REFUND" ou "ROLLBACK" sem o ID da transação referenciada
