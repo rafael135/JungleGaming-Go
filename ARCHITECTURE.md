@@ -72,20 +72,25 @@ O arquivo [keycloak/realm-export.json](file:///d:/Testes%20t%C3%A9cnicos/JungleG
 
 ---
 
-## 5. Próximos Passos (Planejamento do Core da Aplicação)
+---
 
-Com a infraestrutura de apoio 100% pronta e testada, os próximos passos do projeto englobam:
+## 5. Status do Desenvolvimento & Próximos Passos
 
-1. **Camada de Domínio Puro:**
-   * Value Object `Money` (imutável, escala de 2 casas, `int64` centavos, proteção contra overflow, sem floats).
-   * Agregado `Wallet` (invariantes de saldo, controle de concorrência por linha).
-   * Entidade `WagerTransaction` e máquina de estados (`PENDING`, `PENDING_REFERENCE`, `PROCESSED`, `REJECTED`, `FAILED`).
-   * `WalletLedgerEntry` (append-only ledger).
-2. **Camada de Persistência e Migrations:**
-   * Schema SQL com constraints (`CHECK (balance >= 0)`, unicidade de idempotência e inbox).
-   * Repositórios com `pgx` e demarcação explícita de transações.
-3. **Casos de Uso e Workers:**
-   * Caso de uso unificado para HTTP e SQS com deduplicação e hash canônico.
-   * Consumidor SQS com Inbox Pattern e transactional outbox worker.
-4. **Composição com Uber Fx e Lifecycle:**
-   * Injeção de dependência e graceful shutdown observável.
+### 5.1. Fase 1: Camada de Domínio Puro (CONCLUÍDA ✅)
+A camada de domínio puro foi totalmente implementada em Go com zero dependências externas e 100% de cobertura nos requisitos da Seção 6 do teste técnico, validada por **118 testes unitários automatizados**:
+* **Value Object `Money` ([internal/domain/money.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/money.go)):** Imutável, escala fixa de 2 casas em `int64` centavos, **zero floats** em parsing/operações/formatação, checagem matemática de overflow de `math.MaxInt64`/`math.MinInt64`.
+* **Agregado `Wallet` ([internal/domain/wallet.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/wallet.go)):** Raiz de agregado com separação estrita de criação (`NewWallet`) e reidratação (`RehydrateWallet`), controle de versão incremental (`version++`), proteção contra saldo negativo no `Debit` e isolamento por moeda.
+* **Entidade `WalletLedgerEntry` ([internal/domain/ledger.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/ledger.go)):** Lançamento contábil imutável (append-only) com verificação da equação invariante `balanceAfter = balanceBefore ± amount`.
+* **Entidade `WagerTransaction` ([internal/domain/transaction.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/transaction.go)):** Máquina de estados com proteção contra mutações a partir de estados terminais (`PROCESSED`, `REJECTED`, `FAILED`), validações de `BET`, `WIN`, `LOSS` (saldo zero), `REFUND`/`ROLLBACK` (com referência externa obrigatória) e abertura interna `OPENING`.
+
+### 5.2. Fase 2: Banco de Dados, Schema & Migrations (PLANEJADA 📋)
+1. **Schema SQL com Constraints no PostgreSQL 16+:**
+   * `wallets`: `CONSTRAINT chk_wallet_balance_non_negative CHECK (balance_cents >= 0)` e `UNIQUE(player_id, currency)`.
+   * `wallet_ledger_entries`: `UNIQUE(wallet_id, transaction_id)` e trigger `BEFORE UPDATE OR DELETE` garantindo imutabilidade append-only.
+   * `wager_transactions`: `UNIQUE(provider_id, idempotency_key)` e hash canônico SHA-256.
+   * `inbox_messages` e `outbox_messages` para resiliência distribuída e Transactional Outbox.
+2. **Repositórios com `pgx/v5`:**
+   * Pool de conexões com `pgxpool.Pool`.
+   * Locking pessimista por carteira: `SELECT ... FOR UPDATE` por ID de carteira (garante paralelismo entre carteiras distintas e serialização segura na mesma carteira).
+   * Demarcação de transação SQL explícita (`pgx.Tx`) envolvendo saldo, ledger, transação e outbox no mesmo commit atômico.
+3. **Migrations:** Versionamento com arquivos `.up.sql` e `.down.sql` e automação via `Makefile`.
