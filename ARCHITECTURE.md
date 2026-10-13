@@ -32,7 +32,7 @@ Nesta etapa inicial de fundação da solução, foi construído todo o ambiente 
 ## 2. Decisões de Infraestrutura e Mensageria
 
 ### 2.1. IaC Declarativo com AWS CloudFormation em YAML
-* **Decisão:** O provisionamento das filas SQS FIFO no LocalStack foi estruturado em um template declarativo AWS CloudFormation ([infra/sqs-template.yaml](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/infra/sqs-template.yaml)).
+* **Decisão:** O provisionamento das filas SQS FIFO no LocalStack foi estruturado em um template declarativo AWS CloudFormation ([infra/sqs-template.yaml](./infra/sqs-template.yaml)).
 * **Justificativa:** Substitui scripts procedurais em Bash por um manifesto de infraestrutura formal e versionado (padrão oficial AWS / SAM), com resolução automática de referências (`!GetAtt DLQ.Arn`).
 * **Automação no Boot:** O LocalStack sobe com os serviços `sqs,cloudformation` e aplica a stack automaticamente via hook de inicialização, garantindo execução com zero comandos manuais.
 * **Topologia Provisionada:**
@@ -56,7 +56,7 @@ Nesta etapa inicial de fundação da solução, foi construído todo o ambiente 
 * **Justificativa:** A integração com provedores de jogos é uma comunicação máquina-a-máquina (M2M). Não há envolvimento de formulários de login de usuários finais nem telas interativas.
 
 ### 3.2. Modelo de Permissões e Identidades de Teste
-O arquivo [keycloak/realm-export.json](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/keycloak/realm-export.json) pré-configura o realm `jungle` com as seguintes identidades:
+O arquivo [keycloak/realm-export.json](./keycloak/realm-export.json) pré-configura o realm `jungle` com as seguintes identidades:
 * `provider-a` (Secret: `provider-a-secret`): Representa o Provedor A. O token emitido contém a role `provider` e a claim `providerId: provider-a`.
 * `provider-b` (Secret: `provider-b-secret`): Representa o Provedor B para validação de **isolamento multi-tenant** (rejeição de acessos cruzados com `403 Forbidden`).
 * `internal-service` (Secret: `internal-service-secret`): Serviço interno com a role `internal`, exclusivo para abertura de carteira e reconciliação.
@@ -65,9 +65,9 @@ O arquivo [keycloak/realm-export.json](file:///d:/Testes%20t%C3%A9cnicos/JungleG
 
 ## 4. Decisões de Reprodutibilidade e Tooling
 
-* **Configuração Centralizada:** Todas as variáveis e credenciais de teste locais foram isoladas no [.env.example](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/.env.example) e [.env](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/.env), seguindo as diretrizes de Twelve-Factor App.
+* **Configuração Centralizada:** Todas as variáveis e credenciais de teste locais foram isoladas no [.env.example](./.env.example) e [.env](./.env), seguindo as diretrizes de Twelve-Factor App.
 * **Automação Cross-Platform:**
-  * [Makefile](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/Makefile): Padroniza os comandos exigidos pelo desafio (`make up`, `make verify`, `make test`, `make vet`, `make test-race`).
+  * [Makefile](./Makefile): Padroniza os comandos exigidos pelo desafio (`make up`, `make verify`, `make test`, `make vet`, `make test-race`).
   * Scripts PowerShell (`.ps1`) e Bash (`.sh`): Garantem que testes de fumaça e geração de tokens funcionem perfeitamente tanto no Windows nativo quanto no Linux/macOS/CI.
 
 ---
@@ -78,10 +78,10 @@ O arquivo [keycloak/realm-export.json](file:///d:/Testes%20t%C3%A9cnicos/JungleG
 
 ### 5.1. Fase 1: Camada de Domínio Puro (CONCLUÍDA ✅)
 A camada de domínio puro foi totalmente implementada em Go com zero dependências externas e 100% de cobertura nos requisitos da Seção 6 do teste técnico, validada por **118 testes unitários automatizados**:
-* **Value Object `Money` ([internal/domain/money.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/money.go)):** Imutável, escala fixa de 2 casas em `int64` centavos, **zero floats** em parsing/operações/formatação, checagem matemática de overflow de `math.MaxInt64`/`math.MinInt64`.
-* **Agregado `Wallet` ([internal/domain/wallet.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/wallet.go)):** Raiz de agregado com separação estrita de criação (`NewWallet`) e reidratação (`RehydrateWallet`), controle de versão incremental (`version++`), proteção contra saldo negativo no `Debit` e isolamento por moeda.
-* **Entidade `WalletLedgerEntry` ([internal/domain/ledger.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/ledger.go)):** Lançamento contábil imutável (append-only) com verificação da equação invariante `balanceAfter = balanceBefore ± amount`.
-* **Entidade `WagerTransaction` ([internal/domain/transaction.go](file:///d:/Testes%20t%C3%A9cnicos/JungleGaming%20Go/internal/domain/transaction.go)):** Máquina de estados com proteção contra mutações a partir de estados terminais (`PROCESSED`, `REJECTED`, `FAILED`), validações de `BET`, `WIN`, `LOSS` (saldo zero), `REFUND`/`ROLLBACK` (com referência externa obrigatória) e abertura interna `OPENING`.
+* **Value Object `Money` ([internal/domain/money.go](./internal/domain/money.go)):** Imutável, escala fixa de 2 casas em `int64` centavos, **zero floats** em parsing/operações/formatação, checagem matemática de overflow de `math.MaxInt64`/`math.MinInt64`.
+* **Agregado `Wallet` ([internal/domain/wallet.go](./internal/domain/wallet.go)):** Raiz de agregado com separação estrita de criação (`NewWallet`) e reidratação (`RehydrateWallet`), controle de versão incremental (`version++`), proteção contra saldo negativo no `Debit` e isolamento por moeda.
+* **Entidade `WalletLedgerEntry` ([internal/domain/ledger.go](./internal/domain/ledger.go)):** Lançamento contábil imutável (append-only) com verificação da equação invariante `balanceAfter = balanceBefore ± amount`.
+* **Entidade `WagerTransaction` ([internal/domain/transaction.go](./internal/domain/transaction.go)):** Máquina de estados com proteção contra mutações a partir de estados terminais (`PROCESSED`, `REJECTED`, `FAILED`), validações de `BET`, `WIN`, `LOSS` (saldo zero), `REFUND`/`ROLLBACK` (com referência externa obrigatória) e abertura interna `OPENING`.
 
 ### 5.2. Fase 2: Banco de Dados, Schema & Migrations (PLANEJADA 📋)
 1. **Schema SQL com Constraints no PostgreSQL 16+:**
