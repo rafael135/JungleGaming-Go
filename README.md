@@ -200,6 +200,27 @@ curl -X POST "http://localhost:8081/wagering/transactions" \
   }'
 ```
 
+### 8.5. Reconciliação Contábil da Carteira (Internal Service)
+```bash
+curl -X POST "http://localhost:8081/wallets/0192f291-27dd-7d3f-8071-5f8685deef37/reconciliation" \
+  -H "Authorization: Bearer $INTERNAL_TOKEN"
+```
+
+### 8.6. Consulta ao Ledger Contábil Paginado
+```bash
+curl -X GET "http://localhost:8081/wallets/0192f291-27dd-7d3f-8071-5f8685deef37/ledger?limit=10" \
+  -H "Authorization: Bearer $INTERNAL_TOKEN"
+```
+
+### 8.7. Health Checks Públicos
+```bash
+# Liveness do processo
+curl -X GET "http://localhost:8081/health/live"
+
+# Readiness do PostgreSQL e AWS SQS
+curl -X GET "http://localhost:8081/health/ready"
+```
+
 ---
 
 ## 9. Comandos do Desafio
@@ -207,17 +228,32 @@ curl -X POST "http://localhost:8081/wagering/transactions" \
 Os comandos padrões estipulados na avaliação:
 
 ```bash
-# Execução dos testes automatizados da aplicação
-go test ./...
+# Subir todo o ambiente e compilar a API
+docker compose up --build
 
-# Execução com detecção de concorrência / data races
-go test -race ./...
+# Ou rodar a aplicação Go localmente com Uber Fx
+make run
+# ou via Go direto
+go run cmd/api/main.go cmd/api/app.go
+
+# Execução de todos os testes (unitários, integração e concorrência)
+make test
+# ou: go test -p 1 ./...
+
+# Execução com detecção de concorrência / data races do Go
+make test-race
+# ou: go test -p 1 -race ./...
+
+# Execução dos testes com métricas de cobertura
+make test-coverage
 
 # Análise estática do código Go
-go vet ./...
+make vet
+# ou: go vet ./...
 
-# Formatação do código
-gofmt -s -w .
+# Formatação estrita do código Go
+make fmt
+# ou: gofmt -s -w .
 
 # Derrubar a infraestrutura e limpar volumes
 make down

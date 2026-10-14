@@ -1,152 +1,214 @@
 # Arquitetura e Decisões de Projeto — Jungle Gaming Backend
 
-Este documento registra as decisões de arquitetura e infraestrutura implementadas **até o momento** no projeto, além das premissas estabelecidas para o desenvolvimento do core em Go.
+Este documento detalha todas as decisões arquiteturais, padrões de concorrência, integridade contábil, segurança, mensageria e ciclo de vida adotados no projeto Jungle Gaming, atendendo rigorosamente aos requisitos das **Instruções do Teste Técnico** (Seções 1 a 16).
 
 ---
 
-## 1. O que foi Implementado até o Momento
+## 1. Visão Geral da Arquitetura
 
-Nesta etapa inicial de fundação da solução, foi construído todo o ambiente local automatizado, declarativo e reprodutível, eliminando qualquer dependência de configuração manual:
+O sistema adota os princípios da **Clean Architecture** (Arquitetura Limpa / Hexagonal), dividindo a base de código em camadas desacopladas com fluxo unidirecional de dependência:
 
 ```
-[Desenvolvedor / Avaliador]
-       │
-       ▼  docker compose up -d
-+───────────────────────────────────────────────────────────────────────────+
-│                            Docker Compose                                 │
-│                                                                           │
-│  ┌──────────────────┐  ┌───────────────────────────┐  ┌────────────────┐  │
-│  │  PostgreSQL 16+  │  │      LocalStack 3.8       │  │  Keycloak 26   │  │
-│  │   (postgres:16)  │  │   (CloudFormation SQS)    │  │ (Quarkus Dev)  │  │
-│  │                  │  │                           │  │                │  │
-│  │  - jungle_db     │  │  - wager-transactions.fifo│  │  - Realm jungle│  │
-│  │  - Healthcheck   │  │  - wager-events.fifo      │  │  - provider-a  │  │
-│  │    (pg_isready)  │  │  - DLQs + Redrive         │  │  - provider-b  │  │
-│  │                  │  │                           │  │  - internal    │  │
-│  └──────────────────┘  └───────────────────────────┘  └────────────────┘  │
-+───────────────────────────────────────────────────────────────────────────+
+┌────────────────────────────────────────────────────────────────────────┐
+│                   Camada de Infraestrutura / Adapters                   │
+│  ┌───────────────────────┐  ┌───────────────────┐  ┌────────────────┐  │
+│  │   HTTP Handlers &     │  │   PostgreSQL 16+  │  │  AWS SQS FIFO  │  │
+│  │   Keycloak OIDC Auth  │  │     (pgx/v5)      │  │  (LocalStack)  │  │
+│  └───────────┬───────────┘  └─────────┬─────────┘  └────────┬───────┘  │
+│              │                        │                     │          │
+│              ▼                        ▼                     ▼          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │              Camada de Aplicação (Casos de Uso & DTOs)           │  │
+│  │   - CreateWalletUseCase      - ProcessWagerUseCase               │  │
+│  │   - ReconcileWalletUseCase   - ResolvePendingReferencesUseCase   │  │
+│  │   - GetWalletUseCase         - GetWalletLedgerUseCase            │  │
+│  │   - Canonical Hasher (SHA-256)  - Ports & Interfaces             │  │
+│  └──────────────────────────────────┬───────────────────────────────┘  │
+│                                     │                                  │
+│                                     ▼                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                  Camada de Domínio Puro (Go Puro)                │  │
+│  │   - Value Object: Money (int64 centavos, zero floats)            │  │
+│  │   - Agregado: Wallet (versionamento, debit/credit)               │  │
+│  │   - Entidade: WalletLedgerEntry (livro-razão imutável)           │  │
+│  │   - Entidade: WagerTransaction (máquina de estados)              │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 2. Decisões de Infraestrutura e Mensageria
-
-### 2.1. IaC Declarativo com AWS CloudFormation em YAML
-* **Decisão:** O provisionamento das filas SQS FIFO no LocalStack foi estruturado em um template declarativo AWS CloudFormation ([infra/sqs-template.yaml](./infra/sqs-template.yaml)).
-* **Justificativa:** Substitui scripts procedurais em Bash por um manifesto de infraestrutura formal e versionado (padrão oficial AWS / SAM), com resolução automática de referências (`!GetAtt DLQ.Arn`).
-* **Automação no Boot:** O LocalStack sobe com os serviços `sqs,cloudformation` e aplica a stack automaticamente via hook de inicialização, garantindo execução com zero comandos manuais.
-* **Topologia Provisionada:**
-  1. **Entrada (Consumidor de Operações - Seção 10):**
-     * Fila principal: `wager-transactions.fifo` (`FifoQueue: true`, `ContentBasedDeduplication: false`).
-     * Fila morta: `wager-transactions-dlq.fifo` associada via `RedrivePolicy` com `maxReceiveCount: 3`.
-  2. **Saída (Transactional Outbox - Seção 11):**
-     * Fila principal: `wager-events.fifo` para publicação de eventos de integração.
-     * Fila morta: `wager-events-dlq.fifo`.
-
-### 2.2. Banco de Dados PostgreSQL 16+
-* **Decisão:** Uso da imagem oficial `postgres:16-alpine`.
-* **Justificativa:** Atende ao requisito do teste de PostgreSQL 16+, com pegada de memória mínima e `healthcheck` ativo via `pg_isready` para sincronização de dependências.
+* **Domínio Puro (`internal/domain`):** Zero dependências externas (nem banco, nem HTTP, nem frameworks). Lógica de negócio expressa em Go puro e imutável.
+* **Aplicação (`internal/application`):** Orquestra fluxos através de interfaces (`ports.go`), gerencia fronteiras transacionais com `TransactionManager` e computa hashes de idempotência canônicos.
+* **Infraestrutura (`internal/infrastructure`):** Implementa os adaptadores técnicos: PostgreSQL 16+ com connection pool, AWS SDK v2 para filas SQS FIFO, validação OIDC Keycloak com RSA JWKS, HTTP Handlers nativos (Go 1.22+ mux) e background workers.
+* **Injeção de Dependência & Composição (`cmd/api`):** Toda a montagem de dependências e ciclo de vida é governada pelo **Uber Fx (`go.uber.org/fx`)**.
 
 ---
 
-## 3. Decisões de Autenticação e Autorização (OIDC / Keycloak)
+## 2. Decisões Financeiras: Precisão e Zero Floats
 
-### 3.1. Justificativa do IdP e Fluxo M2M
-* **Decisão:** Adoção do Keycloak 26 Quarkus em modo de desenvolvimento (`start-dev --import-realm`), utilizando o fluxo **Client Credentials Grant** (RFC 6749).
-* **Justificativa:** A integração com provedores de jogos é uma comunicação máquina-a-máquina (M2M). Não há envolvimento de formulários de login de usuários finais nem telas interativas.
-
-### 3.2. Modelo de Permissões e Identidades de Teste
-O arquivo [keycloak/realm-export.json](./keycloak/realm-export.json) pré-configura o realm `jungle` com as seguintes identidades:
-* `provider-a` (Secret: `provider-a-secret`): Representa o Provedor A. O token emitido contém a role `provider` e a claim `providerId: provider-a`.
-* `provider-b` (Secret: `provider-b-secret`): Representa o Provedor B para validação de **isolamento multi-tenant** (rejeição de acessos cruzados com `403 Forbidden`).
-* `internal-service` (Secret: `internal-service-secret`): Serviço interno com a role `internal`, exclusivo para abertura de carteira e reconciliação.
+### 2.1. Representação e Escala Fixa
+* **Decisão:** Todos os valores monetários transitam no domínio como o Value Object `Money` (`internal/domain/money.go`), encapsulando `amountCents int64` e `currency string` (ISO 4217, 3 caracteres).
+* **Zero Floats:** Não há qualquer uso de `float32` ou `float64` em operações financeiras, parsing de strings ou formatação. A escala é fixa em 2 casas decimais (1 unidade monetária = 100 centavos).
+* **Prevenção de Overflow:** O construtor `ParseMoney` e as operações aritméticas (`Add`, `Subtract`) realizam checagens explícitas contra overflow de inteiros de 64 bits (`math.MaxInt64` e `math.MinInt64`), retornando `ErrAmountOverflow`.
+* **Persistência no Banco:** Mapeado estritamente como colunas **`BIGINT`** (`balance_cents`, `amount_cents`, `balance_before_cents`, `balance_after_cents`), garantindo precisão matemática exata a nível de hardware e banco.
 
 ---
 
-## 4. Decisões de Reprodutibilidade e Tooling
+## 3. Concorrência e Estratégia de Locks
 
-* **Configuração Centralizada:** Todas as variáveis e credenciais de teste locais foram isoladas no [.env.example](./.env.example) e [.env](./.env), seguindo as diretrizes de Twelve-Factor App.
-* **Automação Cross-Platform:**
-  * [Makefile](./Makefile): Padroniza os comandos exigidos pelo desafio (`make up`, `make verify`, `make test`, `make vet`, `make test-race`).
-  * Scripts PowerShell (`.ps1`) e Bash (`.sh`): Garantem que testes de fumaça e geração de tokens funcionem perfeitamente tanto no Windows nativo quanto no Linux/macOS/CI.
-
----
-
----
-
-## 5. Status do Desenvolvimento & Próximos Passos
-
-### 5.1. Fase 1: Camada de Domínio Puro (CONCLUÍDA ✅)
-A camada de domínio puro foi totalmente implementada em Go com zero dependências externas e 100% de cobertura nos requisitos da Seção 6 do teste técnico, validada por **118 testes unitários automatizados**:
-* **Value Object `Money` ([internal/domain/money.go](./internal/domain/money.go)):** Imutável, escala fixa de 2 casas em `int64` centavos, **zero floats** em parsing/operações/formatação, checagem matemática de overflow de `math.MaxInt64`/`math.MinInt64`.
-* **Agregado `Wallet` ([internal/domain/wallet.go](./internal/domain/wallet.go)):** Raiz de agregado com separação estrita de criação (`NewWallet`) e reidratação (`RehydrateWallet`), controle de versão incremental (`version++`), proteção contra saldo negativo no `Debit` e isolamento por moeda.
-* **Entidade `WalletLedgerEntry` ([internal/domain/ledger.go](./internal/domain/ledger.go)):** Lançamento contábil imutável (append-only) com verificação da equação invariante `balanceAfter = balanceBefore ± amount`.
-* **Entidade `WagerTransaction` ([internal/domain/transaction.go](./internal/domain/transaction.go)):** Máquina de estados com proteção contra mutações a partir de estados terminais (`PROCESSED`, `REJECTED`, `FAILED`), validações de `BET`, `WIN`, `LOSS` (saldo zero), `REFUND`/`ROLLBACK` (com referência externa obrigatória) e abertura interna `OPENING`.
-
-### 5.2. Fase 2: Banco de Dados, Persistência & Migrations (CONCLUÍDA ✅)
-
-A persistência do sistema foi construída para garantir que as invariantes financeiras e a imutabilidade contábil sejam impostas pelo PostgreSQL 16+, independentemente da memória da aplicação:
-
-#### 1. Biblioteca Escolhida (`pgx/v5` e `golang-migrate`)
-* **Driver do Banco:** `github.com/jackc/pgx/v5` com connection pool `pgxpool.Pool` ([internal/infrastructure/database/postgres.go](./internal/infrastructure/database/postgres.go)). O driver foi configurado com limites de conexões (`MaxConns = 25`, `MinConns = 5`), timeouts de ociosidade e verificação ativa de liveness via `Ping` no boot.
-* **Mecanismo de Migrations:** Adotado o padrão da biblioteca oficial `github.com/golang-migrate/migrate/v4` com suporte ao driver `pgx5` e arquivos SQL embutidos no binário via `source/iofs` (`//go:embed *.sql`).
-  * **Self-Migrating no Boot:** O binário aplica as migrations automaticamente na inicialização.
-  * **Controle Manual:** CLI dedicado em [cmd/migrate/main.go](./cmd/migrate/main.go) com comandos `up`, `down` e `version` integrados ao Makefile.
-  * **Tabela de Auditoria:** `schema_migrations` gerencia a versão ativa e a flag `dirty`.
-
-#### 2. Mapeamento de `Money` no PostgreSQL
-* **Princípio Zero Floats:** Nenhum cálculo, casting ou serialização transita por ponto flutuante (`float32`/`float64`).
-* **Representação no Banco:**
-  * Valores monetários são persistidos estritamente como **`BIGINT`** em centavos mínimos (`balance_cents`, `amount_cents`, `balance_before_cents`, `balance_after_cents`).
-  * A moeda é persistida como **`VARCHAR(3)`** (código ISO 4217).
-* **Mapeamento Bidirecional:**
-  * Leitura: `domain.NewMoney(balanceCents, currency)` reconstitui o Value Object imutável.
-  * Escrita: `money.Cents()` e `money.Currency()` extraem os dados sem conversão decimal.
-
-#### 3. Delimitação da Transação SQL (Unit of Work / Transaction Manager)
-* **Fronteira Transacional:** A atomicidade entre alterações de saldo, inserção no ledger, atualização da máquina de estados e enfileiramento na outbox é delimitada pelo padrão **`TransactionManager`** ([internal/application/ports.go](./internal/application/ports.go)), implementado por `PostgresTransactionManager` ([internal/infrastructure/database/transaction_manager.go](./internal/infrastructure/database/transaction_manager.go)).
-* **Padrão Callback / Closure:**
-  ```go
-  err := tm.Execute(ctx, func(tx pgx.Tx) error {
-      // 1. SELECT ... FOR UPDATE na carteira
-      // 2. Operações de débito/crédito no domínio
-      // 3. walletRepo.Update(ctx, tx, wallet)
-      // 4. ledgerRepo.Create(ctx, tx, ledgerEntry)
-      // 5. wagerRepo.Create/Update(ctx, tx, wagerTx)
-      // 6. outboxRepo.Create(ctx, tx, event)
-      // Retornar nil confirma (COMMIT); retornar erro desfaz tudo (ROLLBACK)
-  })
+### 3.1. Lock Pessimista por Carteira (`SELECT ... FOR UPDATE`)
+* **Decisão:** A coordenação de operações financeiras sobre a mesma carteira utiliza **Lock Pessimista** no PostgreSQL:
+  ```sql
+  SELECT id, player_id, currency, balance_cents, version, created_at, updated_at
+  FROM wallets
+  WHERE id = $1
+  FOR UPDATE;
   ```
-* Se qualquer operação falhar ou a aplicação sofrer interrupção abrupta (`SIGKILL`), o PostgreSQL efetua `ROLLBACK` atômico completo, impedindo estados inconsistentes ou publicações prematuras.
+* **Justificativa:** Em sistemas de alta concorrência financeira, o controle pessimista na linha da carteira serializa com segurança os débitos e créditos, prevenindo race conditions, double-spending e saldos negativos sem depender de retries excessivos no cliente.
+* **Isolamento de Carteiras Distintas:** Operações em carteiras diferentes nunca bloqueiam umas às outras, permitindo throughput escalável horizontalmente.
 
-#### 4. Constraints e Proteções no Banco
-* **`wallets`:** `CONSTRAINT chk_wallet_balance_non_negative CHECK (balance_cents >= 0)` (garantia física de saldo não-negativo) e `UNIQUE(player_id, currency)`.
-* **`wallet_ledger_entries` (Livro-Razão):**
-  * `UNIQUE(wallet_id, transaction_id)`: Impede lançamentos contábeis duplicados para a mesma transação.
-  * Trigger `prevent_ledger_modification()`: Função PL/pgSQL ativada `BEFORE UPDATE OR DELETE` que dispara exceção de segurança, garantindo que o ledger seja **estritamente append-only**.
-* **`wager_transactions`:** 4 índices parciais únicos no PostgreSQL:
-  1. `uq_wager_provider_idempotency`: `(provider_id, idempotency_key)` onde ambos são não-nulos.
-  2. `uq_wager_opening`: `UNIQUE(wallet_id)` onde `transaction_type = 'OPENING'` (impede abertura duplicada).
-  3. `uq_wager_reversal_type`: `(provider_id, reference_external_transaction_id, transaction_type)` com `status = 'PROCESSED'` (impede duas reversões bem-sucedidas do mesmo tipo sobre a mesma aposta).
-  4. `idx_wager_pending_reference`: Índice parcial para busca rápida de transações aguardando referências externas.
-* **`inbox_messages`:** `PRIMARY KEY (consumer_name, message_id)` para deduplicação atômica com `ON CONFLICT DO NOTHING`.
-* **`outbox_messages`:** Transactional Outbox com polling concorrente via `SELECT ... FOR UPDATE SKIP LOCKED`, permitindo múltiplos publishers em paralelo sem deadlock.
+### 3.2. Double-Checked Locking para Idempotência Concorrente
+* Quando múltiplas requisições com a mesma chave de idempotência disparam no mesmo milissegundo:
+  1. A primeira transação adquire o lock `FOR UPDATE` da carteira, processa e commita.
+  2. As demais transações aguardavam o lock. Ao adquirirem a posse da carteira, realizam um **re-check imediato de idempotência** antes de qualquer mutação.
+  3. Identificando que a transação foi commitada pelo vencedor, devolvem o **replay idempotente seguro (`idempotentReplay: true`)** com o saldo observado original, sem gerar conflitos de constraint única nem erros 500.
 
 ---
 
-### 5.3. Fase 3: Camada de Aplicação & Casos de Uso (EM ANDAMENTO 🚀)
-1. **`CreateWalletUseCase` (CONCLUÍDO ✅):**
-   * Criação de carteiras com validação monetária e transação atômica.
-   * Emissão de transação `OPENING`, lançamento `CREDIT` no ledger e eventos `WagerTransactionProcessed` e `WalletBalanceChanged` na outbox quando saldo inicial for positivo.
-   * Regra de saldo zero: não gera `OPENING`, ledger nem outbox.
-   * Validado por 7 testes unitários cobrindo todos os casos de borda ([internal/application/usecase_wallet_test.go](./internal/application/usecase_wallet_test.go)).
-2. **`ProcessWagerUseCase` (PRÓXIMO PASSO 📋):**
-   * Orquestração unificada para HTTP (`POST /wagering/transactions`) e SQS FIFO (`WagerTransactionRequested`).
-   * Deduplicação via Inbox, idempotência persistente via hash canônico SHA-256 e detecção de conflitos (`409 Conflict`).
-   * Lock pessimista por carteira (`SELECT ... FOR UPDATE`).
-   * Máquina de estados para `BET`, `WIN`, `LOSS`, `REFUND` e `ROLLBACK`.
-   * Suporte a chegadas fora de ordem com status `PENDING_REFERENCE`.
-3. **Casos de Uso de Leitura e Reconciliação:**
-   * `GetWalletUseCase`, `GetWalletLedgerUseCase` (paginação opaca por cursor).
-   * `ReconcileWalletUseCase` (`POST /wallets/:walletId/reconciliation`).
+## 4. Idempotência e Hash Canônico Determinístico
 
+### 4.1. Algoritmo e Normalização de Hash
+* **Algoritmo:** SHA-256 sobre JSON canônico com chaves ordenadas alfabeticamente ([internal/application/hasher.go](./internal/application/hasher.go)).
+* **Campos Incluídos no Hash de Negócio:**
+  * `amount`: formatado estritamente em string decimal com 2 casas (`"25.00"`).
+  * `currency`: normalizado em maiúsculo (`"BRL"`).
+  * `externalTransactionId`: identificador do provedor.
+  * `gameId` e `roundId`: identificadores do jogo e rodada.
+  * `kind`: tipo de operação (`"BET"`, `"WIN"`, `"REFUND"`, etc.).
+  * `playerId` e `walletId`: identidades do jogador e da carteira.
+  * `providerId`: identificador do provedor.
+  * `referenceExternalTransactionId`: referência externa (quando aplicável).
+* **Campos Excluídos:** Metadados de transporte (`Idempotency-Key`, `ConsumerName`, `MessageID`, timestamps de chegada, cabeçalhos HTTP).
+* **Garantia de Equivalência HTTP e SQS:** Tanto uma mensagem vinda por HTTP quanto vinda por SQS geram o mesmo hash determinístico exato.
+
+### 4.2. Políticas de Replay e Conflito
+* **Mesma Chave + Mesmo Payload:** Devolve o resultado original persistido (`idempotentReplay: true`), retornando o **saldo observado original** na época do processamento, mesmo que a carteira já tenha sofrido movimentações posteriores.
+* **Mesma Chave + Payload Diferente:** Retorna `409 Conflict` (`ErrIdempotencyConflict`).
+* **Mesmo `(providerId, externalTransactionId)` com Chave Diferente:** Retorna `409 Conflict` (`ErrExternalTransactionConflict`).
+
+---
+
+## 5. Livro-Razão (Ledger) e Reconciliação Contábil
+
+### 5.1. Imutabilidade do Ledger
+* A tabela `wallet_ledger_entries` é estritamente **append-only**.
+* Protegida no PostgreSQL por trigger PL/pgSQL `prevent_ledger_modification()` que bloqueia qualquer comando `UPDATE` ou `DELETE`.
+* Todo lançamento valida em código e em banco a equação invariante:
+  $$\text{balanceAfter} = \text{balanceBefore} \pm \text{amount}$$
+
+### 5.2. Reconciliação Matemática (`POST /wallets/{walletId}/reconciliation`)
+* O caso de uso `ReconcileWalletUseCase` reconstrói o saldo da carteira somando os créditos e subtraindo os débitos de todos os lançamentos contábeis (incluindo a abertura `OPENING`).
+* Compara o saldo recalculado contra o saldo armazenado na tabela `wallets`:
+  $$\text{difference} = \text{storedBalance} - \text{calculatedBalance}$$
+* Retorna `consistent: true` e `difference: "0.00"` caso a integridade contábil esteja 100% perfeita. Divergências são emitidas em logs e métricas sem alterar o saldo.
+
+---
+
+## 6. Mensageria e Confiabilidade (Inbox e Transactional Outbox)
+
+### 6.1. Consumidor SQS FIFO com Inbox Pattern
+* **Fila de Entrada:** `wager-transactions.fifo` com redrive policy para `wager-transactions-dlq.fifo` (`maxReceiveCount: 3`).
+* **Deduplicação Atômica via Inbox:** Na entrada SQS, `TryRecord` insere `(consumer_name, message_id)` dentro da **mesma transação SQL** que processa o débito e grava o ledger. Se a mensagem for reentregue pelo SQS, a chave primária da inbox descarta o processamento duplicado com segurança.
+* **Remoção Segura da Fila:** O `DeleteMessage` no SQS só é executado **após o commit bem-sucedido** da transação no PostgreSQL.
+
+### 6.2. Publicação com Transactional Outbox
+* **Fila de Saída:** `wager-events.fifo` com fila morta `wager-events-dlq.fifo`.
+* **Atomicidade:** Os eventos (`WagerTransactionProcessed`, `WalletBalanceChanged`, etc.) são inseridos na tabela `outbox_messages` dentro da mesma transação do negócio.
+* **Worker de Publicação Concorrente:**
+  * Utiliza `SELECT ... FOR UPDATE SKIP LOCKED` em lotes de 20 mensagens.
+  * Permite múltiplos publishers concorrentes rodando em paralelo sem deadlock e sem disputa pelas mesmas linhas.
+  * Implementa retry com backoff exponencial (`next_attempt_at = now + 2^retries * 500ms`). Mensagens com mais de 5 tentativas esgotadas são marcadas como `FAILED` para investigação sem travar a outbox.
+* **Eventos Emitidos:**
+  * `WagerTransactionProcessed`
+  * `WagerTransactionRejected`
+  * `WalletBalanceChanged`
+  * `WagerTransactionPendingReference`
+
+### 6.3. Resolução de Referências Pendentes
+* Quando um `REFUND` ou `ROLLBACK` chega antes da `BET` original correspondente, a operação transiciona para `PENDING_REFERENCE`.
+* Um background worker periódico (`PendingReferenceWorker`) busca referências pendentes e tenta resolvê-las. Operações com pendência superior a 24 horas (`TTL`) são transicionadas para `REJECTED` por expiração.
+
+---
+
+## 7. Autenticação, Autorização e Isolamento Multi-Tenant
+
+### 7.1. Keycloak 26 OIDC (Client Credentials)
+* Autenticação via tokens JWT assinados com RSA (algoritmo `RS256`).
+* O validador OIDC ([internal/infrastructure/auth/oidc_validator.go](./internal/infrastructure/auth/oidc_validator.go)) realiza cache em memória das chaves públicas obtidas do endpoint JWKS (`/protocol/openid-connect/certs`), evitando roundtrips de rede a cada requisição.
+
+### 7.2. Matriz de Autorização e Isolamento de Tenants
+| Identidade | Roles | Permissões |
+| :--- | :--- | :--- |
+| `internal-service` | `internal` | Criar carteiras (`POST /wallets`), consultar ledgers, executar reconciliação. |
+| `provider-a` | `provider` | Enviar apostas (`POST /wagering/transactions`), consultar suas próprias transações. |
+| `provider-b` | `provider` | Enviar apostas, restrito exclusivamente ao tenant `provider-b`. |
+
+* **Isolamento de Provedor (Multi-Tenant Guard):**
+  * Se um token emitido para `provider-a` tentar enviar ou consultar uma transação com `providerId: provider-b`, o middleware bloqueia a chamada retornando **`403 Forbidden`**.
+  * Se um provedor tentar acessar rotas internas de abertura de carteira ou reconciliação, recebe **`403 Forbidden`**.
+
+---
+
+## 8. Composição e Ciclo de Vida com Uber Fx
+
+### 8.1. Grafo de Dependências (`cmd/api/app.go`)
+O Uber Fx gerencia o grafo de injeção de dependências desacoplando completamente a inicialização dos módulos:
+* `fx.Provide`: Registra Config, Logger estruturado, Connection Pool do Postgres, Repositórios, SQS Publisher/Consumer, Use Cases, Token Validator e HTTP Router.
+* `fx.Invoke`: Registra os ganchos de ciclo de vida (`fx.Lifecycle`) para o servidor HTTP e para os workers em background.
+
+### 8.2. Graceful Shutdown (Encerramento Seguro)
+Ao receber `SIGINT` ou `SIGTERM`, os ganchos `OnStop` são disparados na ordem inversa de criação:
+1. **HTTP Server:** Cancela novas conexões e drena requisições em voo com timeout seguro (`server.Shutdown(ctx)`).
+2. **SQS Consumer:** Cancela o contexto de long polling, interrompendo requisições ativas instantaneamente (`consumer.Stop()`).
+3. **Outbox Publisher & Pending Worker:** Aguardam a conclusão do lote atual e finalizam seus tickers.
+4. **PostgreSQL Pool:** Drena e encerra todas as conexões do pool (`pool.Close()`).
+* Todo o ciclo de parada foi verificado via teste automatizado (`cmd/api/app_test.go`), concluindo em menos de 1.5s sem processos zumbis ou conexões órfãs.
+
+---
+
+## 9. Comprovação dos Testes Obrigatórios de Concorrência
+
+Os testes automatizados em [cmd/api/concurrency_test.go](./cmd/api/concurrency_test.go) comprovam os cenários exigidos na Seção 13 do desafio:
+
+1. **Mesma aposta 50 vezes em paralelo:**
+   * 50 goroutines simultâneas disparadas por barreira de sincronização.
+   * Resultado: **Exatamente 1 débito efetuado**, 49 replays com o saldo original observado, e reconciliação confirmando consistência contábil de 2 lançamentos no ledger.
+2. **Disputa de duas apostas de 80.00 BRL sobre saldo de 100.00 BRL:**
+   * Disparo concorrente de duas apostas distintas.
+   * Resultado: **Exatamente 1 aposta processada (`PROCESSED`)** e **1 aposta rejeitada (`REJECTED` com `INSUFFICIENT_FUNDS`)**. Saldo final permaneceu estritamente em **20.00 BRL** sem permitir saldo negativo.
+3. **Processamento paralelo de 10 carteiras distintas:**
+   * Executadas simultaneamente sem concorrência espúria nem deadlocks.
+
+---
+
+## 10. Guia de Execução Rápida
+
+### Subir o ambiente completo via Docker Compose:
+```sh
+docker compose up --build
+```
+
+### Rodar todos os testes automatizados (unitários, integração e concorrência):
+```sh
+make test
+```
+
+### Rodar testes com detector de race conditions do Go:
+```sh
+make test-race
+```
+
+### Rodar análise estática e formatação:
+```sh
+make vet
+make fmt
+```
