@@ -194,22 +194,6 @@ func RehydrateWagerTransaction(
 		return nil, ErrInvalidTransactionId
 	}
 
-	if externalTransactionID == "" {
-		return nil, ErrInvalidExternalTransactionId
-	}
-
-	if providerID == "" {
-		return nil, ErrInvalidProviderId
-	}
-
-	if idempotencyKey == "" {
-		return nil, ErrInvalidIdempotencyKey
-	}
-
-	if payloadHash == "" {
-		return nil, ErrInvalidPayloadHash
-	}
-
 	if walletID == "" {
 		return nil, ErrInvalidWalletId
 	}
@@ -218,12 +202,30 @@ func RehydrateWagerTransaction(
 		return nil, ErrInvalidPlayerId
 	}
 
-	if gameID == "" {
-		return nil, ErrInvalidGameId
-	}
+	if transactionType != TransactionTypeOpening {
+		if externalTransactionID == "" {
+			return nil, ErrInvalidExternalTransactionId
+		}
 
-	if roundID == "" {
-		return nil, ErrInvalidRoundId
+		if providerID == "" {
+			return nil, ErrInvalidProviderId
+		}
+
+		if idempotencyKey == "" {
+			return nil, ErrInvalidIdempotencyKey
+		}
+
+		if payloadHash == "" {
+			return nil, ErrInvalidPayloadHash
+		}
+
+		if gameID == "" {
+			return nil, ErrInvalidGameId
+		}
+
+		if roundID == "" {
+			return nil, ErrInvalidRoundId
+		}
 	}
 
 	if transactionType != TransactionTypeOpening &&

@@ -659,3 +659,41 @@ func TestRehydrateWagerTransaction(t *testing.T) {
 		t.Errorf("esperava updatedAt %v, recebeu %v", now, result.UpdatedAt())
 	}
 }
+
+func TestRehydrateOpeningTransaction(t *testing.T) {
+	amount, _ := NewMoney(10000, "BRL")
+	now := time.Now().UTC()
+
+	result, err := RehydrateWagerTransaction(
+		"tx-rehydrate-op-1",
+		"",
+		"",
+		"",
+		"",
+		"w-1",
+		"p-1",
+		"",
+		"",
+		TransactionTypeOpening,
+		amount,
+		"",
+		TransactionStatusProcessed,
+		"",
+		now,
+		now,
+	)
+
+	if err != nil {
+		t.Fatalf("esperava sucesso na reidratacao de OPENING, recebeu %v", err)
+	}
+
+	if result.ID() != "tx-rehydrate-op-1" {
+		t.Errorf("esperava ID tx-rehydrate-op-1, recebeu %s", result.ID())
+	}
+	if result.TransactionType() != TransactionTypeOpening {
+		t.Errorf("esperava tipo OPENING, recebeu %s", result.TransactionType())
+	}
+	if result.Status() != TransactionStatusProcessed {
+		t.Errorf("esperava status PROCESSED, recebeu %s", result.Status())
+	}
+}
