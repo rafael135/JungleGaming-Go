@@ -123,6 +123,24 @@ func TestMessagingAndOutbox_LiveIntegration(t *testing.T) {
 		inboxRepo,
 	)
 
+	// Drena mensagens residuais de execuções anteriores para garantir determinismo
+	for {
+		drainOut, _ := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+			QueueUrl:            aws.String(inQueueURL),
+			MaxNumberOfMessages: 10,
+			WaitTimeSeconds:     1,
+		})
+		if drainOut == nil || len(drainOut.Messages) == 0 {
+			break
+		}
+		for _, dm := range drainOut.Messages {
+			_, _ = sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+				QueueUrl:      aws.String(inQueueURL),
+				ReceiptHandle: dm.ReceiptHandle,
+			})
+		}
+	}
+
 	// 3. Envia mensagem real para a fila SQS FIFO wager-transactions.fifo no LocalStack
 	msgID := fmt.Sprintf("msg-int-%s", uuid.NewString()[:8])
 	idemKey := fmt.Sprintf("prov-int:%s", msgID)
