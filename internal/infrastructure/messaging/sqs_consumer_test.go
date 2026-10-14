@@ -149,9 +149,11 @@ func (o *testOutboxRepo) Create(ctx context.Context, tx pgx.Tx, msg *database.Ou
 func (o *testOutboxRepo) FetchPending(ctx context.Context, tx pgx.Tx, limit int) ([]*database.OutboxMessage, error) {
 	return nil, nil
 }
-func (o *testOutboxRepo) MarkPublished(ctx context.Context, tx pgx.Tx, id string) error               { return nil }
-func (o *testOutboxRepo) ScheduleRetry(ctx context.Context, tx pgx.Tx, id string, at time.Time) error { return nil }
-func (o *testOutboxRepo) MarkFailed(ctx context.Context, tx pgx.Tx, id string) error                  { return nil }
+func (o *testOutboxRepo) MarkPublished(ctx context.Context, tx pgx.Tx, id string) error { return nil }
+func (o *testOutboxRepo) ScheduleRetry(ctx context.Context, tx pgx.Tx, id string, at time.Time) error {
+	return nil
+}
+func (o *testOutboxRepo) MarkFailed(ctx context.Context, tx pgx.Tx, id string) error { return nil }
 
 type testInboxRepo struct {
 	recorded map[string]string
@@ -300,4 +302,3 @@ func TestSQSConsumer(t *testing.T) {
 		consumer.Stop()
 	})
 }
-

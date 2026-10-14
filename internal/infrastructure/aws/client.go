@@ -53,4 +53,3 @@ func NewSQSClient(ctx context.Context, cfg Config) (*sqs.Client, error) {
 
 	return client, nil
 }
-

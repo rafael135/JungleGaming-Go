@@ -228,4 +228,3 @@ func (r *OutboxRepository) MarkFailed(
 
 	return nil
 }
-

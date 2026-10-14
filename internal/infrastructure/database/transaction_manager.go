@@ -33,4 +33,3 @@ func (tm *PostgresTransactionManager) Execute(ctx context.Context, fn func(tx pg
 
 	return nil
 }
-

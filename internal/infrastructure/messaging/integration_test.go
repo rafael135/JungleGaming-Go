@@ -166,7 +166,7 @@ func TestMessagingAndOutbox_LiveIntegration(t *testing.T) {
 			WaitTimeSeconds:   2,
 			VisibilityTimeout: 10,
 		},
-		discardLogger,
+		slog.Default(),
 	)
 
 	// Recebe a mensagem do SQS diretamente para verificação determinística

@@ -290,4 +290,3 @@ func (r *WagerTransactionRepository) FetchPendingReferences(
 
 	return transactions, nil
 }
-

@@ -10,10 +10,10 @@ import (
 )
 
 type mockReconciliationMetrics struct {
-	called          bool
-	lastWalletID    string
-	lastConsistent  bool
-	lastDiffCents   int64
+	called         bool
+	lastWalletID   string
+	lastConsistent bool
+	lastDiffCents  int64
 }
 
 func (m *mockReconciliationMetrics) RecordReconciliation(walletID string, consistent bool, differenceCents int64) {

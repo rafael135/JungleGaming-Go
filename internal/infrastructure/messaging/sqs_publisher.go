@@ -44,4 +44,3 @@ func (p *SQSPublisher) PublishFIFO(
 
 	return nil
 }
-

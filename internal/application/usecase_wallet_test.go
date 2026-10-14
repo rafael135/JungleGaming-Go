@@ -292,4 +292,3 @@ func TestCreateWalletUseCase(t *testing.T) {
 		}
 	})
 }
-

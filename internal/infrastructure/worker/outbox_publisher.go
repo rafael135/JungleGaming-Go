@@ -190,4 +190,3 @@ func (p *OutboxPublisher) pollLoop(ctx context.Context) {
 		}
 	}
 }
-

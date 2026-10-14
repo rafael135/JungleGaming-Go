@@ -48,6 +48,7 @@ type SQSConsumer struct {
 
 	wg     sync.WaitGroup
 	stopCh chan struct{}
+	cancel context.CancelFunc
 }
 
 func NewSQSConsumer(
@@ -87,13 +88,19 @@ func (c *SQSConsumer) Start(ctx context.Context) error {
 		slog.String("consumer", c.cfg.ConsumerName),
 	)
 
+	pollCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+
 	c.wg.Add(1)
-	go c.pollLoop(ctx)
+	go c.pollLoop(pollCtx)
 
 	return nil
 }
 
 func (c *SQSConsumer) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 	close(c.stopCh)
 	c.wg.Wait()
 	c.logger.Info("consumidor SQS FIFO finalizado com sucesso")
@@ -206,4 +213,3 @@ func (c *SQSConsumer) processSingleMessage(ctx context.Context, msg types.Messag
 		)
 	}
 }
-

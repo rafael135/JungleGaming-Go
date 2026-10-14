@@ -237,4 +237,3 @@ func TestOutboxPublisher(t *testing.T) {
 		w.Stop()
 	})
 }
-

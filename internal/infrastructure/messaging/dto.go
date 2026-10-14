@@ -24,4 +24,3 @@ type SQSRequestedMessageEnvelope struct {
 	OccurredAt string           `json:"occurredAt"`
 	Data       SQSRequestedData `json:"data"`
 }
-

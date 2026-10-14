@@ -115,4 +115,3 @@ func (w *PendingReferenceWorker) pollLoop(ctx context.Context) {
 		}
 	}
 }
-

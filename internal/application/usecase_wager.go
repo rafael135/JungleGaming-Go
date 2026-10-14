@@ -199,6 +199,28 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 			return ErrCurrencyMismatch
 		}
 
+		// Re-check de idempotência após adquirir o lock da carteira (Double-Checked Locking).
+		// Se outra requisição concorrente foi commitada enquanto aguardávamos o lock,
+		// identificamos aqui e retornamos o replay seguro sem conflitos de constraint.
+		lockedExistingTx, err := uc.wagerRepo.GetByIdempotencyKey(ctx, tx, input.ProviderID, input.IdempotencyKey)
+		if err == nil && lockedExistingTx != nil {
+			if lockedExistingTx.PayloadHash() != payloadHash {
+				return ErrIdempotencyConflict
+			}
+			bal, err := uc.getObservedBalance(ctx, tx, lockedExistingTx)
+			if err != nil {
+				return err
+			}
+			output = &ProcessWagerOutput{
+				TransactionID:    lockedExistingTx.ID(),
+				Status:           string(lockedExistingTx.Status()),
+				Balance:          bal,
+				IdempotentReplay: true,
+				FailureCode:      lockedExistingTx.FailureCode(),
+			}
+			return nil
+		}
+
 		balanceBefore := wallet.Balance()
 		txID := uuid.NewString()
 

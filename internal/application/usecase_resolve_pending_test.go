@@ -315,4 +315,3 @@ func TestResolvePendingReferencesUseCase(t *testing.T) {
 		}
 	})
 }
-

@@ -282,4 +282,3 @@ func (uc *ResolvePendingReferencesUseCase) applyResolution(
 	output.ResolvedCount++
 	return nil
 }
-

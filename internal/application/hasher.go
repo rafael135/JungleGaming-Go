@@ -45,4 +45,3 @@ func ComputePayloadHash(input ProcessWagerInput) (string, error) {
 	hash := sha256.Sum256(bytes)
 	return hex.EncodeToString(hash[:]), nil
 }
-

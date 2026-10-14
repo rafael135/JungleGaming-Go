@@ -121,4 +121,3 @@ func TestPendingReferenceWorker(t *testing.T) {
 		w.Stop()
 	})
 }
-

@@ -364,4 +364,3 @@ func (f *fakeInboxRepository) MarkProcessed(ctx context.Context, tx pgx.Tx, cons
 	f.processed[key] = true
 	return nil
 }
-

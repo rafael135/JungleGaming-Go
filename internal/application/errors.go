@@ -16,4 +16,3 @@ var (
 	ErrInvalidTransactionQuery     = errors.New("transaction query requires transactionId or (providerId and externalTransactionId)")
 	ErrTransactionNotFound         = errors.New("transaction not found")
 )
-

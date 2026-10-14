@@ -281,15 +281,15 @@ func (uc *GetWagerTransactionUseCase) Execute(ctx context.Context, input GetWage
 		}
 
 		output = &GetWagerTransactionOutput{
-			ID:                             txObj.ID(),
-			ExternalTransactionID:          txObj.ExternalTransactionID(),
-			ProviderID:                     txObj.ProviderID(),
-			IdempotencyKey:                 txObj.IdempotencyKey(),
-			WalletID:                       txObj.WalletID(),
-			PlayerID:                       txObj.PlayerID(),
-			GameID:                         txObj.GameID(),
-			RoundID:                        txObj.RoundID(),
-			TransactionType:                string(txObj.TransactionType()),
+			ID:                    txObj.ID(),
+			ExternalTransactionID: txObj.ExternalTransactionID(),
+			ProviderID:            txObj.ProviderID(),
+			IdempotencyKey:        txObj.IdempotencyKey(),
+			WalletID:              txObj.WalletID(),
+			PlayerID:              txObj.PlayerID(),
+			GameID:                txObj.GameID(),
+			RoundID:               txObj.RoundID(),
+			TransactionType:       string(txObj.TransactionType()),
 			Amount: WalletBalance{
 				Amount:   txObj.Amount().String(),
 				Currency: txObj.Amount().Currency(),
@@ -309,4 +309,3 @@ func (uc *GetWagerTransactionUseCase) Execute(ctx context.Context, input GetWage
 
 	return output, nil
 }
-
