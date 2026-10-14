@@ -60,6 +60,34 @@ services:
       retries: 15
       start_period: 15s
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jungle-api
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081
+      DATABASE_URL: postgres://${POSTGRES_USER:-jungle}:${POSTGRES_PASSWORD:-jungle_secret}@postgres:5432/${POSTGRES_DB:-jungle_db}?sslmode=disable
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/wager-events.fifo
+      KEYCLOAK_ISSUER: http://keycloak:8080/realms/jungle
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/jungle/protocol/openid-connect/certs
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
 volumes:
   postgres_data:
 

@@ -36,11 +36,17 @@ token-provider-b: ## Fetch JWT access token for provider-b from Keycloak
 token-internal: ## Fetch JWT access token for internal-service from Keycloak
 	@bash scripts/get-token.sh internal-service
 
+run: ## Run the backend API server with Uber Fx
+	go run cmd/api/main.go cmd/api/app.go
+
 test: ## Run standard Go tests
-	go test ./...
+	go test -p 1 ./...
 
 test-race: ## Run Go tests with race detector enabled
-	go test -race ./...
+	go test -p 1 -race ./...
+
+test-coverage: ## Run Go tests with coverage
+	go test -p 1 -cover ./...
 
 vet: ## Run go vet static analyzer
 	go vet ./...
