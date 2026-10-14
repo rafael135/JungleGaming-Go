@@ -48,6 +48,16 @@ vet: ## Run go vet static analyzer
 fmt: ## Format Go source code
 	gofmt -s -w .
 
+migrate-up: ## Run all pending database migrations
+	go run cmd/migrate/main.go up
+
+migrate-down: ## Rollback the last applied database migration
+	go run cmd/migrate/main.go down
+
+migrate-version: ## Check current database migration version
+	go run cmd/migrate/main.go version
+
 tidy: ## Download and tidy Go module dependencies
 	go mod tidy
+
 
