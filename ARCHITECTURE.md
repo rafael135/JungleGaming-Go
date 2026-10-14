@@ -83,14 +83,70 @@ A camada de domínio puro foi totalmente implementada em Go com zero dependênci
 * **Entidade `WalletLedgerEntry` ([internal/domain/ledger.go](./internal/domain/ledger.go)):** Lançamento contábil imutável (append-only) com verificação da equação invariante `balanceAfter = balanceBefore ± amount`.
 * **Entidade `WagerTransaction` ([internal/domain/transaction.go](./internal/domain/transaction.go)):** Máquina de estados com proteção contra mutações a partir de estados terminais (`PROCESSED`, `REJECTED`, `FAILED`), validações de `BET`, `WIN`, `LOSS` (saldo zero), `REFUND`/`ROLLBACK` (com referência externa obrigatória) e abertura interna `OPENING`.
 
-### 5.2. Fase 2: Banco de Dados, Schema & Migrations (PLANEJADA 📋)
-1. **Schema SQL com Constraints no PostgreSQL 16+:**
-   * `wallets`: `CONSTRAINT chk_wallet_balance_non_negative CHECK (balance_cents >= 0)` e `UNIQUE(player_id, currency)`.
-   * `wallet_ledger_entries`: `UNIQUE(wallet_id, transaction_id)` e trigger `BEFORE UPDATE OR DELETE` garantindo imutabilidade append-only.
-   * `wager_transactions`: `UNIQUE(provider_id, idempotency_key)` e hash canônico SHA-256.
-   * `inbox_messages` e `outbox_messages` para resiliência distribuída e Transactional Outbox.
-2. **Repositórios com `pgx/v5`:**
-   * Pool de conexões com `pgxpool.Pool`.
-   * Locking pessimista por carteira: `SELECT ... FOR UPDATE` por ID de carteira (garante paralelismo entre carteiras distintas e serialização segura na mesma carteira).
-   * Demarcação de transação SQL explícita (`pgx.Tx`) envolvendo saldo, ledger, transação e outbox no mesmo commit atômico.
-3. **Migrations:** Versionamento com arquivos `.up.sql` e `.down.sql` e automação via `Makefile`.
+### 5.2. Fase 2: Banco de Dados, Persistência & Migrations (CONCLUÍDA ✅)
+
+A persistência do sistema foi construída para garantir que as invariantes financeiras e a imutabilidade contábil sejam impostas pelo PostgreSQL 16+, independentemente da memória da aplicação:
+
+#### 1. Biblioteca Escolhida (`pgx/v5` e `golang-migrate`)
+* **Driver do Banco:** `github.com/jackc/pgx/v5` com connection pool `pgxpool.Pool` ([internal/infrastructure/database/postgres.go](./internal/infrastructure/database/postgres.go)). O driver foi configurado com limites de conexões (`MaxConns = 25`, `MinConns = 5`), timeouts de ociosidade e verificação ativa de liveness via `Ping` no boot.
+* **Mecanismo de Migrations:** Adotado o padrão da biblioteca oficial `github.com/golang-migrate/migrate/v4` com suporte ao driver `pgx5` e arquivos SQL embutidos no binário via `source/iofs` (`//go:embed *.sql`).
+  * **Self-Migrating no Boot:** O binário aplica as migrations automaticamente na inicialização.
+  * **Controle Manual:** CLI dedicado em [cmd/migrate/main.go](./cmd/migrate/main.go) com comandos `up`, `down` e `version` integrados ao Makefile.
+  * **Tabela de Auditoria:** `schema_migrations` gerencia a versão ativa e a flag `dirty`.
+
+#### 2. Mapeamento de `Money` no PostgreSQL
+* **Princípio Zero Floats:** Nenhum cálculo, casting ou serialização transita por ponto flutuante (`float32`/`float64`).
+* **Representação no Banco:**
+  * Valores monetários são persistidos estritamente como **`BIGINT`** em centavos mínimos (`balance_cents`, `amount_cents`, `balance_before_cents`, `balance_after_cents`).
+  * A moeda é persistida como **`VARCHAR(3)`** (código ISO 4217).
+* **Mapeamento Bidirecional:**
+  * Leitura: `domain.NewMoney(balanceCents, currency)` reconstitui o Value Object imutável.
+  * Escrita: `money.Cents()` e `money.Currency()` extraem os dados sem conversão decimal.
+
+#### 3. Delimitação da Transação SQL (Unit of Work / Transaction Manager)
+* **Fronteira Transacional:** A atomicidade entre alterações de saldo, inserção no ledger, atualização da máquina de estados e enfileiramento na outbox é delimitada pelo padrão **`TransactionManager`** ([internal/application/ports.go](./internal/application/ports.go)), implementado por `PostgresTransactionManager` ([internal/infrastructure/database/transaction_manager.go](./internal/infrastructure/database/transaction_manager.go)).
+* **Padrão Callback / Closure:**
+  ```go
+  err := tm.Execute(ctx, func(tx pgx.Tx) error {
+      // 1. SELECT ... FOR UPDATE na carteira
+      // 2. Operações de débito/crédito no domínio
+      // 3. walletRepo.Update(ctx, tx, wallet)
+      // 4. ledgerRepo.Create(ctx, tx, ledgerEntry)
+      // 5. wagerRepo.Create/Update(ctx, tx, wagerTx)
+      // 6. outboxRepo.Create(ctx, tx, event)
+      // Retornar nil confirma (COMMIT); retornar erro desfaz tudo (ROLLBACK)
+  })
+  ```
+* Se qualquer operação falhar ou a aplicação sofrer interrupção abrupta (`SIGKILL`), o PostgreSQL efetua `ROLLBACK` atômico completo, impedindo estados inconsistentes ou publicações prematuras.
+
+#### 4. Constraints e Proteções no Banco
+* **`wallets`:** `CONSTRAINT chk_wallet_balance_non_negative CHECK (balance_cents >= 0)` (garantia física de saldo não-negativo) e `UNIQUE(player_id, currency)`.
+* **`wallet_ledger_entries` (Livro-Razão):**
+  * `UNIQUE(wallet_id, transaction_id)`: Impede lançamentos contábeis duplicados para a mesma transação.
+  * Trigger `prevent_ledger_modification()`: Função PL/pgSQL ativada `BEFORE UPDATE OR DELETE` que dispara exceção de segurança, garantindo que o ledger seja **estritamente append-only**.
+* **`wager_transactions`:** 4 índices parciais únicos no PostgreSQL:
+  1. `uq_wager_provider_idempotency`: `(provider_id, idempotency_key)` onde ambos são não-nulos.
+  2. `uq_wager_opening`: `UNIQUE(wallet_id)` onde `transaction_type = 'OPENING'` (impede abertura duplicada).
+  3. `uq_wager_reversal_type`: `(provider_id, reference_external_transaction_id, transaction_type)` com `status = 'PROCESSED'` (impede duas reversões bem-sucedidas do mesmo tipo sobre a mesma aposta).
+  4. `idx_wager_pending_reference`: Índice parcial para busca rápida de transações aguardando referências externas.
+* **`inbox_messages`:** `PRIMARY KEY (consumer_name, message_id)` para deduplicação atômica com `ON CONFLICT DO NOTHING`.
+* **`outbox_messages`:** Transactional Outbox com polling concorrente via `SELECT ... FOR UPDATE SKIP LOCKED`, permitindo múltiplos publishers em paralelo sem deadlock.
+
+---
+
+### 5.3. Fase 3: Camada de Aplicação & Casos de Uso (EM ANDAMENTO 🚀)
+1. **`CreateWalletUseCase` (CONCLUÍDO ✅):**
+   * Criação de carteiras com validação monetária e transação atômica.
+   * Emissão de transação `OPENING`, lançamento `CREDIT` no ledger e eventos `WagerTransactionProcessed` e `WalletBalanceChanged` na outbox quando saldo inicial for positivo.
+   * Regra de saldo zero: não gera `OPENING`, ledger nem outbox.
+   * Validado por 7 testes unitários cobrindo todos os casos de borda ([internal/application/usecase_wallet_test.go](./internal/application/usecase_wallet_test.go)).
+2. **`ProcessWagerUseCase` (PRÓXIMO PASSO 📋):**
+   * Orquestração unificada para HTTP (`POST /wagering/transactions`) e SQS FIFO (`WagerTransactionRequested`).
+   * Deduplicação via Inbox, idempotência persistente via hash canônico SHA-256 e detecção de conflitos (`409 Conflict`).
+   * Lock pessimista por carteira (`SELECT ... FOR UPDATE`).
+   * Máquina de estados para `BET`, `WIN`, `LOSS`, `REFUND` e `ROLLBACK`.
+   * Suporte a chegadas fora de ordem com status `PENDING_REFERENCE`.
+3. **Casos de Uso de Leitura e Reconciliação:**
+   * `GetWalletUseCase`, `GetWalletLedgerUseCase` (paginação opaca por cursor).
+   * `ReconcileWalletUseCase` (`POST /wallets/:walletId/reconciliation`).
+

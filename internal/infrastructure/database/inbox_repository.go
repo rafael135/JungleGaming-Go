@@ -115,4 +115,3 @@ func (r *InboxRepository) MarkProcessed(
 
 	return nil
 }
-
