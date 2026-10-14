@@ -435,6 +435,11 @@ func TestOutboxRepository_LiveDB(t *testing.T) {
 	ctx := context.Background()
 	outboxRepo := database.NewOutboxRepository()
 
+	_, _ = pool.Exec(ctx, "DELETE FROM outbox_messages")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM outbox_messages")
+	})
+
 	msgID := uuid.NewString()
 	aggregateID := uuid.NewString()
 

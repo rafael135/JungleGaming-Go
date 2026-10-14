@@ -19,6 +19,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -187,19 +188,28 @@ func TestMessagingAndOutbox_LiveIntegration(t *testing.T) {
 		slog.Default(),
 	)
 
-	// Recebe a mensagem do SQS diretamente para verificação determinística
-	receiveOut, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(inQueueURL),
-		MaxNumberOfMessages: 1,
-		WaitTimeSeconds:     5,
-		VisibilityTimeout:   10,
-	})
-	if err != nil || len(receiveOut.Messages) == 0 {
-		t.Fatalf("esperava receber mensagem da fila SQS: %v", err)
+	// Recebe a mensagem do SQS com retry loop determinístico
+	var receivedMsg *types.Message
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		receiveOut, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+			QueueUrl:            aws.String(inQueueURL),
+			MaxNumberOfMessages: 1,
+			WaitTimeSeconds:     2,
+			VisibilityTimeout:   10,
+		})
+		if err == nil && len(receiveOut.Messages) > 0 {
+			receivedMsg = &receiveOut.Messages[0]
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if receivedMsg == nil {
+		t.Fatalf("esperava receber mensagem da fila SQS dentro do prazo de 10s")
 	}
 
 	// Processa mensagem
-	consumer.ProcessSingleMessage(ctx, receiveOut.Messages[0])
+	consumer.ProcessSingleMessage(ctx, *receivedMsg)
 
 	// 5. Verifica no banco se a carteira foi debitada para 75.00 BRL
 	txCheck, _ := pool.Begin(ctx)

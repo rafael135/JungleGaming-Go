@@ -245,9 +245,9 @@ func registerWorkers(
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			logger.Info("iniciando background workers")
-			go consumer.Start(context.Background())
-			go outboxPublisher.Start(context.Background())
-			go pendingWorker.Start(context.Background())
+			_ = consumer.Start(context.Background())
+			_ = outboxPublisher.Start(context.Background())
+			_ = pendingWorker.Start(context.Background())
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {

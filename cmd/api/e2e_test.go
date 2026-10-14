@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +29,13 @@ func fetchToken(t *testing.T, clientID, clientSecret string) string {
 	form.Set("client_id", clientID)
 	form.Set("client_secret", clientSecret)
 
+	issuer := os.Getenv("KEYCLOAK_ISSUER")
+	if issuer == "" {
+		issuer = "http://localhost:8080/realms/jungle"
+	}
+
 	resp, err := http.Post(
-		"http://localhost:8080/realms/jungle/protocol/openid-connect/token",
+		issuer+"/protocol/openid-connect/token",
 		"application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()),
 	)

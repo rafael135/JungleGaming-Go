@@ -3,7 +3,7 @@
 # ==============================================================================
 
 # Estágio 1: Compilação do binário
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 
