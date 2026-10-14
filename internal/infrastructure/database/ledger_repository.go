@@ -262,3 +262,132 @@ func (wl *WalletLedgerEntryRepository) Create(
 
 	return nil
 }
+
+func (wl *WalletLedgerEntryRepository) ListPaginated(
+	ctx context.Context,
+	tx pgx.Tx,
+	walletID string,
+	limit int,
+	cursorCreatedAt *time.Time,
+	cursorID string,
+) ([]*domain.WalletLedgerEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var query string
+	var rows pgx.Rows
+	var err error
+
+	if cursorCreatedAt != nil && cursorID != "" {
+		query = `
+			SELECT
+				id,
+				wallet_id,
+				transaction_id,
+				direction,
+				amount_cents,
+				currency,
+				balance_before_cents,
+				balance_after_cents,
+				created_at
+			FROM wallet_ledger_entries
+			WHERE wallet_id = $1
+			  AND (created_at, id) > ($2, $3)
+			ORDER BY created_at ASC, id ASC
+			LIMIT $4
+		`
+		rows, err = tx.Query(ctx, query, walletID, *cursorCreatedAt, cursorID, limit)
+	} else {
+		query = `
+			SELECT
+				id,
+				wallet_id,
+				transaction_id,
+				direction,
+				amount_cents,
+				currency,
+				balance_before_cents,
+				balance_after_cents,
+				created_at
+			FROM wallet_ledger_entries
+			WHERE wallet_id = $1
+			ORDER BY created_at ASC, id ASC
+			LIMIT $2
+		`
+		rows, err = tx.Query(ctx, query, walletID, limit)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("erro ao buscar ledger paginado: %w", err)
+	}
+	defer rows.Close()
+
+	var ledgers = make([]*domain.WalletLedgerEntry, 0)
+	for rows.Next() {
+		var (
+			ledgerId       string
+			wID            string
+			transactionID  string
+			direction      string
+			currentBalance int64
+			currency       string
+			balanceBefore  int64
+			balanceAfter   int64
+			createdAt      time.Time
+		)
+
+		err := rows.Scan(
+			&ledgerId,
+			&wID,
+			&transactionID,
+			&direction,
+			&currentBalance,
+			&currency,
+			&balanceBefore,
+			&balanceAfter,
+			&createdAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao escanear linha de ledger paginado: %w", err)
+		}
+
+		currentMoney, err := domain.NewMoney(currentBalance, currency)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao criar money: %w", err)
+		}
+
+		balanceBeforeMoney, err := domain.NewMoney(balanceBefore, currency)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao criar money: %w", err)
+		}
+
+		balanceAfterMoney, err := domain.NewMoney(balanceAfter, currency)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao criar money: %w", err)
+		}
+
+		ledgerDirection := domain.LedgerDirection(direction)
+		ledger, err := domain.RehydrateWalletLedgerEntry(
+			ledgerId,
+			wID,
+			transactionID,
+			ledgerDirection,
+			currentMoney,
+			balanceBeforeMoney,
+			balanceAfterMoney,
+			createdAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao reidratar ledger: %w", err)
+		}
+
+		ledgers = append(ledgers, ledger)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("erro na iteracao do ledger: %w", err)
+	}
+
+	return ledgers, nil
+}

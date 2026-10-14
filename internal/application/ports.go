@@ -22,6 +22,7 @@ type WalletRepository interface {
 type LedgerRepository interface {
 	GetByTransactionID(ctx context.Context, tx pgx.Tx, id string) (*domain.WalletLedgerEntry, error)
 	ListByWalletID(ctx context.Context, tx pgx.Tx, walletID string) ([]*domain.WalletLedgerEntry, error)
+	ListPaginated(ctx context.Context, tx pgx.Tx, walletID string, limit int, cursorCreatedAt *time.Time, cursorID string) ([]*domain.WalletLedgerEntry, error)
 	Create(ctx context.Context, tx pgx.Tx, l *domain.WalletLedgerEntry) error
 }
 
@@ -31,6 +32,7 @@ type WagerTransactionRepository interface {
 	GetByExternalID(ctx context.Context, tx pgx.Tx, providerID string, externalID string) (*domain.WagerTransaction, error)
 	Create(ctx context.Context, tx pgx.Tx, t *domain.WagerTransaction) error
 	Update(ctx context.Context, tx pgx.Tx, t *domain.WagerTransaction) error
+	FetchPendingReferences(ctx context.Context, tx pgx.Tx, limit int) ([]*domain.WagerTransaction, error)
 }
 
 type OutboxRepository interface {

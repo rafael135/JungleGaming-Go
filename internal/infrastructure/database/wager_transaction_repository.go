@@ -255,3 +255,39 @@ func fromNullString(s *string) string {
 	return *s
 }
 
+func (r *WagerTransactionRepository) FetchPendingReferences(
+	ctx context.Context,
+	tx pgx.Tx,
+	limit int,
+) ([]*domain.WagerTransaction, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := selectWagerTransactionSQL + `
+		WHERE status = 'PENDING_REFERENCE'
+		ORDER BY created_at ASC
+		LIMIT $1
+	`
+	rows, err := tx.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao buscar transacoes com referencia pendente: %w", err)
+	}
+	defer rows.Close()
+
+	var transactions []*domain.WagerTransaction
+	for rows.Next() {
+		t, err := r.scanRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, t)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("erro na iteracao de transacoes pendentes: %w", err)
+	}
+
+	return transactions, nil
+}
+
